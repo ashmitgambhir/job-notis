@@ -1,0 +1,324 @@
+# Monitored employers. Add or remove entries here — no code changes needed.
+#
+# `verified: true` means the endpoint below was confirmed against the live API
+# and returned real postings. `verified: false` means the connector/params are
+# a starting point that still needs confirming; run:
+#
+#     jobmon discover --only <slug>     # probe and write back the right params
+#     jobmon doctor                     # re-check everything and flip flags
+#
+# `connector: auto` asks the discovery engine to identify the platform at
+# runtime and cache the result.
+
+defaults:
+  enabled: true
+  priority: normal
+  connector: auto
+  verified: false
+
+companies:
+  # ---------------------------------------------------------------- verified
+  - name: Anduril Industries
+    slug: anduril
+    priority: high
+    connector: greenhouse
+    params: { board_token: andurilindustries }
+    careers_url: https://www.anduril.com/careers/
+    verified: true
+    tags: [defense, hardware, robotics]
+
+  - name: SpaceX
+    slug: spacex
+    priority: high
+    connector: greenhouse
+    params: { board_token: spacex }
+    careers_url: https://www.spacex.com/careers/
+    verified: true
+    tags: [aerospace, propulsion]
+
+  - name: Rocket Lab
+    slug: rocketlab
+    priority: high
+    connector: greenhouse
+    params: { board_token: rocketlab }
+    careers_url: https://www.rocketlabusa.com/careers/
+    verified: true
+    tags: [aerospace]
+
+  - name: Shield AI
+    slug: shieldai
+    priority: high
+    connector: lever
+    params: { board_token: shieldai }
+    careers_url: https://shield.ai/careers/
+    verified: true
+    tags: [defense, robotics, autonomy]
+
+  - name: Boeing
+    slug: boeing
+    priority: high
+    connector: workday
+    params: { tenant: boeing, pod: wd1, site: EXTERNAL_CAREERS }
+    careers_url: https://jobs.boeing.com/
+    verified: true
+    tags: [aerospace, defense]
+
+  - name: Abbott
+    slug: abbott
+    connector: workday
+    params: { tenant: abbott, pod: wd5, site: abbottcareers }
+    careers_url: https://www.jobs.abbott/
+    verified: true
+    tags: [medical-devices]
+
+  - name: Illinois Tool Works
+    slug: itw
+    connector: workday
+    params: { tenant: itw, pod: wd5, site: External }
+    careers_url: https://careers.itw.com/
+    verified: true
+    tags: [manufacturing, industrial]
+
+  - name: NVIDIA
+    slug: nvidia
+    priority: high
+    connector: workday
+    params: { tenant: nvidia, pod: wd5, site: NVIDIAExternalCareerSite }
+    careers_url: https://www.nvidia.com/en-us/about-nvidia/careers/
+    verified: true
+    tags: [semiconductors, hardware]
+
+  - name: Intel
+    slug: intel
+    connector: workday
+    params: { tenant: intel, pod: wd1, site: External }
+    careers_url: https://jobs.intel.com/
+    verified: true
+    tags: [semiconductors, hardware]
+
+  - name: Amazon Web Services
+    slug: aws
+    connector: amazon
+    params: { business_category: aws }
+    careers_url: https://www.amazon.jobs/
+    verified: true
+    tags: [cloud, datacenter-hardware]
+
+  - name: Amazon
+    slug: amazon
+    connector: amazon
+    params: {}
+    careers_url: https://www.amazon.jobs/
+    verified: true
+    tags: [logistics, hardware, robotics]
+
+  # ------------------------------------------------- platform known, unverified
+  # Fingerprinted from the live careers page but the exact API parameters
+  # still need confirming. `jobmon discover` fills these in.
+
+  - name: John Deere
+    slug: johndeere
+    priority: high
+    connector: eightfold
+    params: { host: careers.deere.com, domain: deere.com }
+    careers_url: https://careers.deere.com/careers
+    tags: [agriculture, heavy-equipment]
+    notes: Eightfold front end; confirm the api/apply/v2 domain parameter.
+
+  - name: Northrop Grumman
+    slug: northrop
+    connector: eightfold
+    params: { host: jobs.northropgrumman.com, domain: northropgrumman.com }
+    careers_url: https://jobs.northropgrumman.com/careers
+    tags: [defense, aerospace]
+
+  - name: Navistar International
+    slug: navistar
+    connector: icims
+    params: { tenant: navistar }
+    careers_url: https://careers.navistar.com/
+    tags: [trucks, heavy-equipment]
+
+  - name: Rivian
+    slug: rivian
+    priority: high
+    connector: icims
+    params: { tenant: us-careers-rivian }
+    careers_url: https://careers.rivian.com/careers-home/
+    tags: [automotive, ev]
+
+  - name: Texas Instruments
+    slug: ti
+    connector: oracle
+    params: { host: edbz.fa.us2.oraclecloud.com, site_number: CX_1001 }
+    careers_url: https://careers.ti.com/
+    tags: [semiconductors]
+    notes: Oracle Recruiting pod resolved from the careers.ti.com redirect.
+
+  - name: AGCO
+    slug: agco
+    connector: successfactors
+    params: { host: careers.agcocorp.com }
+    careers_url: https://careers.agcocorp.com/
+    tags: [agriculture, heavy-equipment]
+
+  - name: ExxonMobil
+    slug: exxonmobil
+    connector: successfactors
+    params: { host: jobs.exxonmobil.com }
+    careers_url: https://jobs.exxonmobil.com/
+    tags: [energy]
+
+  - name: Hershey
+    slug: hershey
+    connector: successfactors
+    params: { host: careers.thehersheycompany.com }
+    careers_url: https://careers.thehersheycompany.com/
+    tags: [cpg, manufacturing]
+
+  - name: RTX
+    slug: rtx
+    connector: phenom
+    params: { host: careers.rtx.com, locale: global/en }
+    careers_url: https://careers.rtx.com/global/en
+    tags: [aerospace, defense]
+
+  - name: United Airlines
+    slug: united
+    connector: phenom
+    params: { host: careers.united.com, locale: us/en }
+    careers_url: https://careers.united.com/us/en
+    tags: [aviation]
+
+  - name: Siemens
+    slug: siemens
+    connector: avature
+    params: { host: jobs.siemens.com }
+    careers_url: https://jobs.siemens.com/careers
+    tags: [industrial, automation]
+
+  - name: Lockheed Martin
+    slug: lockheed
+    connector: jsonld
+    params: { url: "https://www.lockheedmartinjobs.com/search-jobs/mechanical/" }
+    careers_url: https://www.lockheedmartinjobs.com/
+    tags: [defense, aerospace]
+    notes: Radancy-hosted; JSON-LD in the search results is the cheapest source.
+
+  - name: NASA
+    slug: nasa
+    connector: usajobs
+    params: { organization: NASA }
+    careers_url: https://www.nasa.gov/careers/
+    tags: [government, aerospace]
+    notes: Needs a free USAJOBS API key in USAJOBS_API_KEY and USAJOBS_EMAIL.
+
+  # ------------------------------------------------------ auto-detect at runtime
+  - name: Caterpillar
+    slug: caterpillar
+    priority: high
+    careers_url: https://careers.caterpillar.com/
+    tags: [heavy-equipment, manufacturing]
+
+  - name: Cummins
+    slug: cummins
+    priority: high
+    careers_url: https://cummins.jobs/
+    tags: [engines, manufacturing]
+
+  - name: GE Aerospace
+    slug: geaerospace
+    careers_url: https://jobs.geaerospace.com/
+    tags: [aerospace]
+
+  - name: 3M
+    slug: 3m
+    careers_url: https://jobs.3m.com/
+    tags: [materials, manufacturing]
+
+  - name: Emerson
+    slug: emerson
+    careers_url: https://hcm.emerson.com/careers
+    tags: [automation, industrial]
+
+  - name: CNH Industrial
+    slug: cnh
+    careers_url: https://careers.cnh.com/
+    tags: [agriculture, heavy-equipment]
+
+  - name: Medtronic
+    slug: medtronic
+    careers_url: https://jobs.medtronic.com/
+    tags: [medical-devices]
+
+  - name: Parker Hannifin
+    slug: parker
+    careers_url: https://jobs.parker.com/
+    tags: [motion-control, industrial]
+
+  - name: AbbVie
+    slug: abbvie
+    careers_url: https://careers.abbvie.com/
+    tags: [pharma, manufacturing]
+
+  - name: Medline
+    slug: medline
+    careers_url: https://jobs.medline.com/
+    tags: [medical-devices]
+
+  - name: Synchrony
+    slug: synchrony
+    careers_url: https://jobs.synchrony.com/
+    tags: [finance]
+
+  - name: Tesla
+    slug: tesla
+    priority: high
+    careers_url: https://www.tesla.com/careers/search/
+    tags: [automotive, ev, energy]
+    notes: Blocks plain HTTP clients; likely needs the browser fallback.
+
+  - name: Apple
+    slug: apple
+    priority: high
+    careers_url: https://jobs.apple.com/en-us/search
+    tags: [consumer-hardware]
+    notes: Search API requires browser-issued headers.
+
+  - name: Meta
+    slug: meta
+    careers_url: https://www.metacareers.com/jobs
+    tags: [consumer-hardware, ar-vr]
+
+  - name: Blue Origin
+    slug: blueorigin
+    priority: high
+    careers_url: https://www.blueorigin.com/careers
+    tags: [aerospace]
+
+  - name: Ford
+    slug: ford
+    careers_url: https://corporate.ford.com/careers.html
+    tags: [automotive]
+
+  - name: Rolls-Royce
+    slug: rollsroyce
+    careers_url: https://careers.rolls-royce.com/
+    tags: [aerospace, propulsion]
+
+  - name: Sierra Space
+    slug: sierraspace
+    careers_url: https://www.sierraspace.com/careers/
+    tags: [aerospace]
+
+  - name: NASA JPL
+    slug: jpl
+    careers_url: https://www.jpl.nasa.gov/careers/
+    tags: [aerospace, research]
+
+  - name: RTX Raytheon
+    slug: raytheon
+    enabled: false
+    careers_url: https://careers.rtx.com/global/en
+    tags: [defense]
+    notes: Disabled — RTX already covers these postings. Enable if you want both.

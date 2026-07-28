@@ -1,0 +1,84 @@
+# Core runtime settings.
+# Everything here is hot-reloadable with `jobmon run --watch-config`.
+
+timezone: America/Chicago
+
+scan:
+  # Normal cadence. 300s across ~42 companies is roughly 8 requests/minute
+  # spread over 40 hosts, which no board will notice.
+  interval_seconds: 300
+  # Companies tagged `priority: high` poll at this rate instead.
+  priority_interval_seconds: 120
+  max_concurrent_companies: 12
+  per_company_timeout_seconds: 120
+  # Score on the title first and only fetch full descriptions for postings
+  # that could plausibly clear the threshold. This is what keeps a 2-minute
+  # cadence cheap.
+  prefilter_before_detail_fetch: true
+  max_detail_fetches_per_cycle: 60
+  # First sight of a company records its whole board silently. Turn this off
+  # only if you enjoy 2,000 text messages.
+  seed_without_notifying: true
+
+http:
+  connect_timeout_seconds: 10.0
+  read_timeout_seconds: 25.0
+  max_connections: 100
+  max_keepalive_connections: 30
+  max_retries: 3
+  backoff_base_seconds: 0.5
+  backoff_max_seconds: 30.0
+  requests_per_second_per_host: 4.0
+  burst_per_host: 8
+  enable_conditional_requests: true
+  cache_ttl_seconds: 60
+  http2: true
+
+database:
+  # Postgres for multi-instance deployments:
+  #   url: postgresql+psycopg://user:pass@host:5432/jobmonitor
+  url: ${DATABASE_URL:-sqlite:///data/jobmonitor.db}
+  pool_size: 5
+  max_overflow: 10
+  stale_after_days: 45
+
+logging:
+  level: ${LOG_LEVEL:-INFO}
+  # `json` when shipping to a log aggregator.
+  format: ${LOG_FORMAT:-console}
+  file: data/logs/jobmonitor.log
+  rotate_max_bytes: 10485760
+  rotate_backups: 5
+
+matching:
+  # Notify above this score.
+  threshold: 75
+  # Recorded and shown in the daily digest, but never paged.
+  review_threshold: 60
+  embeddings:
+    # Local model, no API cost. Falls back to lexical similarity if the
+    # `embeddings` extra is not installed.
+    enabled: true
+    model: sentence-transformers/all-MiniLM-L6-v2
+    cache_embeddings: true
+  llm:
+    # Off by default. When on, it only adjudicates postings whose rule score
+    # lands in the ambiguous band below.
+    enabled: ${LLM_ENABLED:-false}
+    provider: anthropic
+    # claude-sonnet-5 is a cheaper alternative if you turn this on for a large
+    # company list and the borderline band stays busy.
+    model: ${LLM_MODEL:-claude-opus-5}
+    adjudicate_band_low: 55
+    adjudicate_band_high: 88
+    max_calls_per_cycle: 25
+    max_description_chars: 6000
+    timeout_seconds: 30.0
+    api_key: ${ANTHROPIC_API_KEY}
+
+health:
+  enabled: true
+  http_port: ${HEALTH_PORT:-8080}
+  heartbeat_timeout_seconds: 1800
+  company_failure_alert_threshold: 5
+  cycle_failure_ratio_alert: 0.4

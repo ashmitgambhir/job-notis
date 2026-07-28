@@ -1,0 +1,104 @@
+# Hard exclusions and soft penalties.
+#
+# `exclude_title_patterns` runs before scoring and is a hard drop, so keep it
+# to things that are never worth a second look. Anything debatable belongs in
+# `penalty_patterns`, which only pushes the score down.
+
+exclude_title_patterns:
+  # Software, unless the title itself says it is hardware-adjacent. The
+  # negative lookahead is what keeps "Hardware Software Integration Engineer"
+  # and "Embedded Firmware Engineer" alive.
+  - '(?i)\b(software|full[- ]stack|frontend|front[- ]end|backend|back[- ]end|web|mobile|ios|android|devops|sre|site reliability|cloud|platform|security|qa automation)\s+(engineer|developer|intern)\b(?!.*\b(hardware|firmware|embedded|mechanical|robotics|controls|test bench|instrumentation)\b)'
+  - '(?i)\b(data scientist|data science|machine learning engineer|ml engineer|data analyst|data engineer|business intelligence)\b'
+  - '(?i)\b(accountant|accounting|finance|financial analyst|treasury|audit|tax|actuar)'
+  - '(?i)\b(marketing|brand|communications|public relations|social media|content)\b'
+  - '(?i)\b(sales|account executive|account manager|business development|territory manager|inside sales)\b'
+  - '(?i)\b(human resources|hr business partner|talent acquisition|recruit|people operations)\b'
+  - '(?i)\b(legal|counsel|attorney|paralegal|compliance officer)\b'
+  - '(?i)\b(customer (support|service|success)|help desk|service desk|call center)\b'
+  - '(?i)\b(business analyst|business systems analyst|product owner|scrum master)\b'
+  - '(?i)\b(nurse|nursing|rn\b|physician|clinician|pharmacist|medical doctor|therapist|surgeon)\b'
+  - '(?i)\b(it support|information technology|systems administrator|network administrator|database administrator|helpdesk)\b'
+  - '(?i)\b(driver|warehouse associate|technician i{0,3}\b|assembler|machine operator|janitor|custodian|security guard)\b'
+  # Over-senior. These never make sense for a student.
+  # `principal` on its own: in an engineering title it always denotes
+  # seniority ("Principal Mechanical Engineer"), never a junior role.
+  - '(?i)\b(director|vice president|vp,|chief|head of|principal|distinguished|fellow)\b'
+  # Faculty and post-doc listings that leak into university-adjacent boards.
+  - '(?i)\b(professor|post-?doc|lecturer|adjunct)\b'
+
+# Soft signals. Value is subtracted from the final score.
+penalty_patterns:
+  '(?i)\b(phd|ph\.d\.|doctorate) (required|degree required)\b': 25
+  '(?i)\bmaster.{0,3}s degree required\b': 12
+  '(?i)\bminimum of (5|6|7|8|9|10|1\d)\+? years\b': 30
+  '(?i)\bmba\b': 15
+  '(?i)\bcontract(or)? position\b': 10
+  '(?i)\b(unpaid|volunteer)\b': 40
+
+exclude_departments:
+  - human resources
+  - finance
+  - accounting
+  - legal
+  - marketing
+  - sales
+  - talent acquisition
+  - customer support
+  - information technology
+
+# Empty means keep everything. Values are matched against the classifier's
+# output: intern, co-op, new_grad, full_time, contract, part_time.
+employment_types:
+  - intern
+  - co-op
+  - new_grad
+  - full_time
+
+location:
+  # Empty allow-list means anywhere that survives `deny` and `countries`.
+  allow: []
+  deny:
+    - India
+    - China
+    - Philippines
+    - Malaysia
+    - Singapore
+    - Japan
+    - Korea
+    - Israel
+    - Poland
+    - Romania
+    - Hungary
+    - Czech
+    - Mexico
+    - Brazil
+    - Costa Rica
+  allow_remote: true
+  # Small bonus rather than a filter, so a great role elsewhere still reaches you.
+  preferred:
+    - Illinois
+    - Chicago
+    - Peoria
+    - Moline
+    - Indiana
+    - Wisconsin
+    - Michigan
+    - Ohio
+    - Iowa
+    - Minnesota
+  preferred_bonus: 5
+  countries:
+    - United States
+    - USA
+    - US
+    - Remote
+
+# Set true if you cannot obtain a US security clearance; drops cleared roles.
+exclude_requiring_clearance: false
+# Set true if you require visa sponsorship; drops postings that refuse it.
+exclude_no_sponsorship: false
+
+# On first sight, ignore anything already older than this. Stops a newly added
+# company from paging you about six-month-old listings.
+max_posting_age_days: 30

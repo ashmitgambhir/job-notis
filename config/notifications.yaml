@@ -1,0 +1,89 @@
+# Delivery channels. Secrets come from the environment (.env), never from
+# this file, so it stays safe to commit.
+#
+# Each channel has its own `min_score`, which is the practical way to keep SMS
+# for genuine hits while email carries everything worth a look.
+
+sms:
+  enabled: ${SMS_ENABLED:-false}
+  provider: twilio
+  account_sid: ${TWILIO_ACCOUNT_SID}
+  auth_token: ${TWILIO_AUTH_TOKEN}
+  from_number: ${TWILIO_FROM_NUMBER}
+  to_numbers:
+    - ${ALERT_PHONE_NUMBER}
+  # SMS interrupts you, so hold it to a higher bar than email.
+  min_score: 85
+  max_per_hour: 15
+
+email:
+  enabled: ${EMAIL_ENABLED:-false}
+  # `smtp` or `sendgrid`
+  provider: ${EMAIL_PROVIDER:-smtp}
+  smtp_host: ${SMTP_HOST:-smtp.gmail.com}
+  smtp_port: 587
+  smtp_username: ${SMTP_USERNAME}
+  smtp_password: ${SMTP_PASSWORD}
+  use_tls: true
+  sendgrid_api_key: ${SENDGRID_API_KEY}
+  from_address: ${ALERT_FROM_EMAIL}
+  to_addresses:
+    - ${ALERT_EMAIL}
+    # Carrier email-to-SMS gateway: delivers the same alert to your phone as a
+    # text, for free. The address lives in .env because it embeds a phone
+    # number. Unset it and this line simply disappears — the loader drops
+    # unresolved entries rather than failing.
+    - ${ALERT_SMS_GATEWAY}
+  min_score: 75
+  max_per_hour: 60
+
+slack:
+  enabled: ${SLACK_ENABLED:-false}
+  url: ${SLACK_WEBHOOK_URL}
+  min_score: 75
+  max_per_hour: 120
+
+discord:
+  enabled: ${DISCORD_ENABLED:-false}
+  url: ${DISCORD_WEBHOOK_URL}
+  min_score: 75
+  max_per_hour: 120
+
+telegram:
+  enabled: ${TELEGRAM_ENABLED:-false}
+  bot_token: ${TELEGRAM_BOT_TOKEN}
+  chat_id: ${TELEGRAM_CHAT_ID}
+  min_score: 75
+  max_per_hour: 120
+
+webhook:
+  enabled: ${WEBHOOK_ENABLED:-false}
+  url: ${GENERIC_WEBHOOK_URL}
+  min_score: 75
+  max_per_hour: 120
+  headers: {}
+
+digest:
+  daily_enabled: ${DAILY_DIGEST_ENABLED:-false}
+  daily_at: "08:00"
+  weekly_enabled: ${WEEKLY_DIGEST_ENABLED:-false}
+  weekly_at: "MON 08:00"
+  # Include near-misses so you can tune `matching.threshold` from real data
+  # rather than guesswork.
+  include_review_band: true
+
+# Where the system reports on itself: dead companies, stalled scans, delivery
+# failures.
+alerts:
+  enabled: true
+  channels:
+    - email
+  cooldown_seconds: 3600
+
+# Local-time window where only exceptional matches page you. Leave null to
+# disable. Speed is the priority, so the override is set high but reachable.
+quiet_hours_start: null   # e.g. "23:00"
+quiet_hours_end: null     # e.g. "07:00"
+quiet_hours_override_score: 92
+
+max_delivery_attempts: 4

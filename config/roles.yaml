@@ -1,0 +1,196 @@
+# What counts as a relevant role, and how much each signal is worth.
+#
+# Scoring is deliberately not a flat keyword list. Titles are grouped into
+# families with their own weights so "Mechanical Design Engineer" outranks
+# "Systems Engineer" without hand-tuning every string.
+
+# Anchor sentences for the semantic component. These are embedded once at
+# startup and compared against each posting, which is what lets the system
+# match relevant roles whose titles contain none of the words below.
+semantic_profile:
+  - >-
+    Internship or co-op for an undergraduate mechanical engineering student
+    involving CAD, design, prototyping, testing and analysis of physical
+    hardware.
+  - >-
+    Entry level or new graduate mechanical engineer designing mechanical
+    components and assemblies, running FEA or CFD, and validating physical
+    prototypes.
+  - >-
+    Early career engineer in manufacturing or production supporting tooling,
+    fixtures, process improvement, assembly lines and factory equipment.
+  - >-
+    Hardware focused engineering role covering thermal, structural, fluid,
+    mechanism, or electromechanical design and validation testing.
+  - >-
+    Engineering rotational or leadership development program for recent
+    engineering graduates across design, manufacturing and product roles.
+
+families:
+  - name: core_mechanical
+    weight: 100
+    titles:
+      - Mechanical Engineer
+      - Mechanical Engineering Intern
+      - Mechanical Design Engineer
+      - Mechanical Designer
+      - Mechanical Engineering Co-op
+      - Mechatronics Engineer
+      - Electromechanical Engineer
+    keywords: [mechanical, mechanism, machine design, cad, solidworks, creo, nx, catia]
+
+  - name: design_and_product
+    weight: 92
+    titles:
+      - Design Engineer
+      - Product Engineer
+      - Product Development Engineer
+      - Prototype Engineer
+      - New Product Introduction Engineer
+      - CAE Engineer
+      - CAD Engineer
+      - Thermal Engineer
+    keywords: [design, product development, prototype, tolerance, gd&t, fea, cfd, thermal]
+
+  - name: manufacturing_and_process
+    weight: 88
+    titles:
+      - Manufacturing Engineer
+      - Industrial Engineer
+      - Process Engineer
+      - Production Engineer
+      - Operations Engineer
+      - Manufacturing Leadership Development Program
+    keywords: [manufacturing, tooling, fixture, assembly line, lean, six sigma, cnc, machining]
+
+  - name: test_and_validation
+    weight: 86
+    titles:
+      - Test Engineer
+      - Validation Engineer
+      - Reliability Engineer
+      - Hardware Validation Engineer
+      - Development Engineer
+    keywords: [validation, durability, test rig, dyno, instrumentation, dvp&r, root cause]
+
+  - name: systems_and_controls
+    weight: 78
+    titles:
+      - Systems Engineer
+      - Controls Engineer
+      - Automation Engineer
+      - Robotics Engineer
+      - Vehicle Engineer
+      - Aerospace Engineer
+    keywords: [controls, actuator, plc, kinematics, dynamics, vehicle, propulsion, avionics]
+
+  - name: research
+    weight: 74
+    titles:
+      - Research Engineer
+      - R&D Engineer
+    keywords: [research, advanced development, applied research]
+
+  - name: hardware_generic
+    weight: 70
+    titles:
+      - Hardware Engineer
+      - Engineering Intern
+      - Engineering Co-op
+      - Associate Engineer
+      - Graduate Engineer
+      - Entry Level Engineer
+      - Engineer I
+      - Engineer II
+      - University Hire
+      - Campus Hire
+      - Engineering Leadership Development Program
+      - Engineering Rotation Program
+    keywords: [hardware, engineering intern, co-op, rotational program, campus]
+
+# Seniority signals. Negative weights are how over-senior postings get pushed
+# below the threshold without needing an exclusion rule.
+seniority:
+  - name: internship
+    patterns: ['\bintern(ship)?\b', '\bco-?op\b', '\bsummer 20\d\d\b', '\bstudent\b']
+    weight: 100
+  - name: new_grad
+    patterns:
+      ['\bnew grad(uate)?\b', '\bentry[ -]level\b', '\buniversity\b', '\bcampus\b',
+       '\bearly career\b', '\brotational\b', '\bengineer\s+i\b', '\bassociate engineer\b',
+       '\bgraduate engineer\b', '\bldp\b', '\bleadership development program\b']
+    weight: 95
+  - name: junior
+    patterns: ['\bjunior\b', '\bengineer\s+ii\b', '\b0-2 years\b', '\b1\+? years\b']
+    weight: 70
+  - name: mid
+    patterns: ['\b3\+? years\b', '\b4\+? years\b', '\bengineer\s+iii\b']
+    weight: 25
+  - name: senior
+    patterns:
+      ['\bsenior\b', '\bsr\.?\b', '\bstaff\b', '\bprincipal\b', '\blead\b', '\bmanager\b',
+       '\bdirector\b', '\bhead of\b', '\bfellow\b', '\barchitect\b',
+       '\b[5-9]\+? years\b', '\b1\d\+? years\b']
+    weight: -70
+
+degrees:
+  - mechanical engineering
+  - aerospace engineering
+  - manufacturing engineering
+  - industrial engineering
+  - mechatronics
+  - materials engineering
+  - engineering
+  - bsme
+  - bs/ms
+  - bachelor of science
+
+skills:
+  - solidworks
+  - creo
+  - catia
+  - nx
+  - autocad
+  - inventor
+  - ansys
+  - abaqus
+  - comsol
+  - fea
+  - cfd
+  - gd&t
+  - matlab
+  - labview
+  - 3d printing
+  - additive manufacturing
+  - cnc
+  - machining
+  - injection molding
+  - sheet metal
+  - tolerance analysis
+  - dfm
+  - dfa
+  - thermodynamics
+  - fluid mechanics
+  - heat transfer
+  - statics
+  - dynamics
+  - kinematics
+  - pltw
+  - lean manufacturing
+  - six sigma
+  - root cause analysis
+  - prototyping
+  - dvp&r
+  - instrumentation
+  - data acquisition
+
+# Component weights for the final score. Normalised automatically, so these
+# are relative not absolute.
+weights:
+  title: 0.34
+  semantic: 0.22
+  seniority: 0.16
+  department: 0.08
+  skills: 0.10
+  degree: 0.06
+  description: 0.04

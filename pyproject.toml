@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jobmonitor"
+version = "1.0.0"
+description = "API-first continuous monitor for early-career mechanical engineering roles"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.6",
+    "PyYAML>=6.0",
+    "SQLAlchemy>=2.0",
+    "structlog>=24.1",
+    "APScheduler>=3.10,<4.0",
+    "click>=8.1",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "python-dateutil>=2.9",
+]
+
+[project.optional-dependencies]
+# Local semantic matching. Adds ~200MB; the system degrades to lexical
+# similarity when this is absent.
+embeddings = ["sentence-transformers>=2.7", "numpy>=1.24"]
+# LLM adjudication of borderline matches only.
+llm = ["anthropic>=0.40"]
+# Last-resort connector for career sites with no reachable JSON.
+browser = ["playwright>=1.44"]
+postgres = ["psycopg[binary]>=3.1"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+    "ruff>=0.5",
+]
+all = ["jobmonitor[embeddings,llm,browser,postgres]"]
+
+[project.scripts]
+jobmon = "jobmonitor.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+jobmonitor = ["storage/*.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008", "UP006", "UP007", "UP035", "UP045"]
