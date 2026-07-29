@@ -229,3 +229,89 @@ class TestScorer:
     def test_score_is_bounded(self, scorer, posting_factory):
         estimate, _ = scorer.score_title_only(posting_factory())
         assert 0.0 <= estimate <= 100.0
+
+
+class TestInternsOnly:
+    """The shipped filter must pass internships and co-ops and nothing else.
+
+    Full-time and new-grad roles were reaching the alerts because
+    `employment_types` included them. A new-grad posting is a full-time job,
+    not an internship.
+    """
+
+    @pytest.fixture
+    def shipped(self):
+        from jobmonitor.config.loader import load_config
+
+        return load_config()
+
+    def test_shipped_config_allows_only_intern_and_coop(self, shipped):
+        assert set(shipped.filters.employment_types) == {"intern", "co-op"}
+
+    @pytest.fixture
+    def engine(self, shipped):
+        return RuleEngine(shipped.roles, shipped.filters)
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Mechanical Design Engineer",
+            "Engineer I",
+            "Entry Level Manufacturing Engineer",
+            "Mechanical Engineer II",
+            "Associate Mechanical Engineer",
+        ],
+    )
+    def test_non_intern_roles_are_excluded(self, engine, posting_factory, title):
+        """Whether a role reads as full-time or new-grad, neither is an internship."""
+        p = posting_factory(title=title, description="Design mechanical assemblies.")
+        enrich(p)
+        assert p.employment_type.value not in ("intern", "co-op")
+        assert "employment type not wanted" in (engine.hard_exclusion(p) or "")
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Mechanical Engineering Intern",
+            "Manufacturing Engineering Co-op",
+            "2027 Mechanical Engineer Intern",
+        ],
+    )
+    def test_intern_roles_survive(self, engine, posting_factory, title):
+        p = posting_factory(title=title)
+        enrich(p)
+        assert engine.hard_exclusion(p) is None
+
+    def test_type_filter_is_deferred_until_the_description_is_read(
+        self, engine, posting_factory
+    ):
+        """An internship whose title omits the word must not die in the prefilter.
+
+        Deere titles some student roles "Part Time Student - Product
+        Engineering". Judged on the title alone that classifies as full time,
+        so applying the filter before the detail fetch would discard it unread.
+        """
+        p = posting_factory(title="Product Engineering Analyst", description=None)
+        p.detail_pending = True
+        enrich(p)
+        assert engine.hard_exclusion(p) is None
+
+        # Once the description arrives and confirms full time, it is dropped.
+        p.detail_pending = False
+        p.description = "Full time salaried position. Five years of experience."
+        enrich(p)
+        assert "employment type not wanted" in (engine.hard_exclusion(p) or "")
+
+    def test_deferred_posting_that_turns_out_to_be_an_internship_is_kept(
+        self, engine, posting_factory
+    ):
+        p = posting_factory(title="Product Engineering Analyst", description=None)
+        p.detail_pending = True
+        enrich(p)
+        assert engine.hard_exclusion(p) is None
+
+        p.detail_pending = False
+        p.description = "The intern will support product engineering. Currently enrolled."
+        enrich(p)
+        assert p.employment_type.value == "intern"
+        assert engine.hard_exclusion(p) is None

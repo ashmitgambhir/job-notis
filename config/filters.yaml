@@ -49,11 +49,14 @@ exclude_departments:
 
 # Empty means keep everything. Values are matched against the classifier's
 # output: intern, co-op, new_grad, full_time, contract, part_time.
+#
+# Internships and co-ops ONLY. `new_grad` is deliberately absent: an entry-level
+# or new-graduate posting is a full-time job, not an internship, and including
+# it is what put "Mechanical Engineer I" and "Entry Level Design Engineer" in
+# your alerts.
 employment_types:
   - intern
   - co-op
-  - new_grad
-  - full_time
 
 location:
   # Empty allow-list means anywhere that survives `deny` and `countries`.

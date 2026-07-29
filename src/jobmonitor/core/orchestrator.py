@@ -12,6 +12,7 @@ own timeout.
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
@@ -29,6 +30,17 @@ from ..storage.repository import Repository
 from .models import CompanyScanResult, JobPosting, MatchResult, ScanCycleResult, utcnow
 
 log = structlog.get_logger(__name__)
+
+# Titles that already announce a student role. Used only to order the
+# detail-fetch queue, never to exclude — plenty of internships are titled
+# something else entirely.
+_INTERN_TITLE = re.compile(
+    r"\bintern(ship)?\b|\bco-?op\b|\bstudent\b|\bsummer\s+20\d\d\b|\bcampus\b", re.I
+)
+
+
+def _title_suggests_intern(title: Optional[str]) -> bool:
+    return bool(title) and bool(_INTERN_TITLE.search(title))
 
 
 class Orchestrator:
@@ -211,6 +223,13 @@ class Orchestrator:
         matched: List[Tuple[JobPosting, MatchResult, int]] = []
         detail_fetches = 0
         max_age = self.config.filters.max_posting_age_days
+
+        # Spend the detail-fetch budget on the postings most likely to survive.
+        # Employment type cannot be judged from a title alone, so the filter is
+        # deferred until the description is read — which means a board of
+        # full-time roles could otherwise exhaust the budget before reaching a
+        # single internship. Titles that already say "intern" go first.
+        candidates = sorted(candidates, key=lambda p: not _title_suggests_intern(p.title))
 
         for posting in candidates:
             age = posting.age_days()

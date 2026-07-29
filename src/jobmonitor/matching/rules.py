@@ -63,11 +63,18 @@ class RuleEngine:
         if department and department in self._excluded_departments:
             return f"excluded department: {posting.department}"
 
-        # Only filter on a type we actually determined. An unclassified posting
-        # (no description yet, or an unusual title) must not be dropped just
-        # because "unknown" is not on the allow-list — that would discard
-        # postings before they were ever read.
-        if self.filters.employment_types and posting.employment_type.value != "unknown":
+        # Employment type is only trustworthy once the description has been
+        # read. Judged on a title alone, an internship whose title does not say
+        # "intern" — Deere's "Part Time Student - Product Engineering", say —
+        # classifies as full time and would be thrown away before anything
+        # fetched its description. So while the detail is still pending, defer:
+        # let the posting through the prefilter and apply this rule on the
+        # second pass, when the classifier has the full text to work with.
+        if (
+            self.filters.employment_types
+            and not posting.detail_pending
+            and posting.employment_type.value != "unknown"
+        ):
             allowed = {t.lower() for t in self.filters.employment_types}
             if posting.employment_type.value not in allowed:
                 return f"employment type not wanted: {posting.employment_type.value}"
