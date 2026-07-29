@@ -60,6 +60,26 @@ class DiscoveryResult:
         return self.connector is not None and self.jobs_found > 0
 
 
+# Minimum postings a candidate must return before it is believed, keyed by how
+# the candidate was found.
+#
+# "Returns postings" is not sufficient evidence on its own. A guessed board
+# token can land on a completely different employer that happens to share a
+# name — `blue` on Lever is a data consultancy, not Blue Origin; `parker` on
+# Ashby is a fintech, not Parker Hannifin — or on a real but abandoned stub
+# account, as `caterpillarinc` on SmartRecruiters is, with one admin job
+# standing in for a board of thousands. Both failures look like success and
+# then silently monitor the wrong thing forever.
+#
+# Fingerprinted candidates need no such bar: the URL came from the company's
+# own careers page, so identity is already established and a small board is
+# simply a small board.
+MIN_POSTINGS_BY_SOURCE = {
+    "fingerprint": 1,
+    "fallback": 5,
+    "guess": 15,
+}
+
 # --- Fingerprint patterns -------------------------------------------------- #
 
 _WORKDAY_URL = re.compile(
@@ -122,6 +142,24 @@ class Discovery:
         candidates.sort(key=lambda c: -c.confidence)
         for candidate in candidates:
             ok, count, error = await self._verify(company, candidate)
+
+            # A candidate that answers but returns an implausibly small board
+            # is almost certainly the wrong employer, not a quiet one.
+            minimum = MIN_POSTINGS_BY_SOURCE.get(candidate.source, 1)
+            if ok and count < minimum:
+                ok = False
+                error = (
+                    f"only {count} postings from a {candidate.source} candidate "
+                    f"(needs {minimum}+) — probably a different employer"
+                )
+                log.info(
+                    "discovery_rejected_implausible",
+                    company=company.slug,
+                    connector=candidate.connector,
+                    params=candidate.params,
+                    postings=count,
+                )
+
             result.tried.append((candidate.connector, "ok" if ok else (error or "no jobs")))
             if ok:
                 result.connector = candidate.connector
