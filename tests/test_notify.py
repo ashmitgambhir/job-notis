@@ -228,3 +228,56 @@ class TestQuietHoursWindow:
         dispatcher.timezone_name = "UTC"
         now = datetime(2026, 7, 28, hour, 30, tzinfo=timezone.utc)
         assert dispatcher._in_quiet_hours(now) is expected
+
+
+class TestEmailFilteringHeaders:
+    """Alerts are sent from an address to itself, so they land in both Inbox
+    and Sent with nothing to distinguish them from real mail. These headers
+    are what a mail rule can key on.
+    """
+
+    def _build(self, config):
+        from jobmonitor.notify.channels import EmailChannelImpl
+
+        channel = EmailChannelImpl.__new__(EmailChannelImpl)
+        channel.config = config
+        sent = {}
+
+        import smtplib
+
+        class FakeSMTP:
+            def __init__(self, *a, **k): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def starttls(self, **k): pass
+            def login(self, *a): pass
+            def send_message(self, msg): sent["msg"] = msg
+
+        smtplib.SMTP = FakeSMTP  # type: ignore[misc]
+        channel._send_smtp("[97%] Caterpillar — Intern", "<p>hi</p>", "hi")
+        return sent["msg"]
+
+    def test_headers_are_present(self, config, monkeypatch):
+        import smtplib
+
+        original = smtplib.SMTP
+        try:
+            cfg = config.notifications.email.model_copy(
+                update={
+                    "enabled": True,
+                    "smtp_host": "smtp.example.com",
+                    "smtp_username": "me@example.com",
+                    "smtp_password": "x",
+                    "from_address": "me@example.com",
+                    "to_addresses": ["me+jobs@example.com"],
+                }
+            )
+            msg = self._build(cfg)
+        finally:
+            smtplib.SMTP = original
+
+        assert msg["X-JobMonitor"] == "alert"
+        assert "jobmonitor" in msg["List-Id"]
+        assert msg["Auto-Submitted"] == "auto-generated"
+        # Plus-addressing survives into the envelope.
+        assert "+jobs@" in msg["To"]

@@ -201,6 +201,12 @@ class EmailChannelImpl(Channel):
                 {"type": "text/plain", "value": body_text},
                 {"type": "text/html", "value": body_html},
             ],
+            # Same filtering handles as the SMTP path.
+            "headers": {
+                "X-JobMonitor": "alert",
+                "List-Id": "jobmonitor alerts <jobmonitor.local>",
+                "Auto-Submitted": "auto-generated",
+            },
         }
         payload.pop("personals")
         response, _ = await self.http.request(
@@ -224,6 +230,14 @@ class EmailChannelImpl(Channel):
         message["Subject"] = subject
         message["From"] = self.config.from_address
         message["To"] = ", ".join(self.config.to_addresses)
+        # Filtering handles. These matter because the alerts are usually sent
+        # from an address to itself, so they land in both Inbox and Sent and
+        # there is otherwise nothing to distinguish them from real mail.
+        # List-Id in particular is what mail clients key their
+        # "mute this list" and rule features off.
+        message["X-JobMonitor"] = "alert"
+        message["List-Id"] = "jobmonitor alerts <jobmonitor.local>"
+        message["Auto-Submitted"] = "auto-generated"
         message.set_content(body_text)
         message.add_alternative(body_html, subtype="html")
 
