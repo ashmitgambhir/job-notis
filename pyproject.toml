@@ -33,9 +33,13 @@ llm = ["anthropic>=0.40"]
 browser = ["playwright>=1.44"]
 postgres = ["psycopg[binary]>=3.1"]
 dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-    "respx>=0.21",
+    # Upper-bounded on purpose. CI installs unpinned and resolves whatever is
+    # newest that day, so a major release of the test harness turns into a red
+    # build with no change on our side. These bounds are the versions the
+    # suite is actually verified against; raise them deliberately.
+    "pytest>=8.0,<9",
+    "pytest-asyncio>=0.23,<2",
+    "respx>=0.21,<1",
     "ruff>=0.5",
 ]
 all = ["jobmonitor[embeddings,llm,browser,postgres]"]
