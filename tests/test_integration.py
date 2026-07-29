@@ -361,3 +361,91 @@ class TestScanCycle:
         # Every company failed, but the cycle itself completed cleanly.
         assert len(result.failures) == 2
         assert result.failure_ratio == 1.0
+
+
+class TestHealthAlerting:
+    """Alerts must fire on regressions, not on unconfigured companies.
+
+    A company with no resolved endpoint fails every cycle by construction.
+    Counting those toward the failure ratio produced an alert email and text
+    every hour saying 65% of companies were failing, which is both untrue as
+    an incident and the fastest way to train someone to ignore alerts.
+    """
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_never_working_companies_do_not_alert(self, config, settings):
+        respx.get(
+            "https://boards-api.greenhouse.io/v1/boards/caterpillar/jobs"
+        ).mock(return_value=httpx.Response(500))
+        respx.get(
+            "https://boards-api.greenhouse.io/v1/boards/andurilindustries/jobs"
+        ).mock(return_value=httpx.Response(500))
+
+        config.settings.health.enabled = True
+        repo = Repository(settings.database)
+        await repo.initialize()
+        async with HttpClient(settings.http) as http:
+            dispatcher = Dispatcher(config.notifications, repo, http)
+            sent = []
+
+            async def capture(key, subject, body):
+                sent.append(subject)
+                return True
+
+            dispatcher.send_alert = capture
+            orchestrator = Orchestrator(
+                config, repo, http, Scorer(config), dispatcher
+            )
+            result = await orchestrator.run_cycle()
+
+            # Everything failed, but nothing had ever worked, so it is a
+            # configuration gap rather than an incident.
+            assert len(result.failures) == 2
+            assert sent == []
+        await repo.close()
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_regression_after_a_success_does_alert(self, config, settings):
+        board = "https://boards-api.greenhouse.io/v1/boards/caterpillar/jobs"
+        respx.get(board).mock(
+            return_value=httpx.Response(
+                200,
+                json={"jobs": [{
+                    "id": 1, "title": "Mechanical Engineer",
+                    "absolute_url": "https://x/1",
+                    "location": {"name": "Peoria, IL"},
+                    "updated_at": "2026-07-27T10:00:00Z",
+                }]},
+            )
+        )
+        respx.get(f"{board}/1").mock(
+            return_value=httpx.Response(200, json={"content": "Design parts."})
+        )
+        respx.get(
+            "https://boards-api.greenhouse.io/v1/boards/andurilindustries/jobs"
+        ).mock(return_value=httpx.Response(500))
+
+        config.settings.health.enabled = True
+        repo = Repository(settings.database)
+        await repo.initialize()
+        async with HttpClient(settings.http) as http:
+            dispatcher = Dispatcher(config.notifications, repo, http)
+            sent = []
+
+            async def capture(key, subject, body):
+                sent.append(subject)
+                return True
+
+            dispatcher.send_alert = capture
+            orchestrator = Orchestrator(config, repo, http, Scorer(config), dispatcher)
+
+            await orchestrator.run_cycle()   # caterpillar succeeds, is now known-good
+            sent.clear()
+
+            respx.get(board).mock(return_value=httpx.Response(500))
+            await orchestrator.run_cycle()   # it regresses
+
+            assert any("working companies just failed" in s for s in sent)
+        await repo.close()

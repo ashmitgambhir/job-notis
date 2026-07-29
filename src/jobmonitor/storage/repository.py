@@ -101,6 +101,17 @@ class Repository:
         changed: List[JobPosting] = []
         now = utcnow()
 
+        # Connectors legitimately hand back the same posting twice: paginated
+        # boards overlap when the underlying list shifts mid-walk, and HTML
+        # sources emit one link per layout region. Inserting both copies
+        # violates the job_key unique constraint and aborts the whole batch,
+        # losing every posting for that company. De-duplicate on the way in,
+        # keeping the first occurrence.
+        deduped: Dict[str, JobPosting] = {}
+        for posting in postings:
+            deduped.setdefault(posting.job_key, posting)
+        postings = list(deduped.values())
+
         with self.session() as s:
             keys = [p.job_key for p in postings]
             existing: Dict[str, Job] = {}
@@ -114,12 +125,16 @@ class Repository:
                 if row is None:
                     # A different requisition ID carrying an identical
                     # title+location is a re-post, not a new opening.
-                    twin = s.scalars(
-                        select(Job)
-                        .where(Job.dedupe_hash == posting.dedupe_hash)
-                        .where(Job.closed_at.is_(None))
-                        .limit(1)
-                    ).first()
+                    # no_autoflush: this SELECT would otherwise flush the rows
+                    # queued earlier in the loop, turning any constraint issue
+                    # into a failure of the whole batch mid-iteration.
+                    with s.no_autoflush:
+                        twin = s.scalars(
+                            select(Job)
+                            .where(Job.dedupe_hash == posting.dedupe_hash)
+                            .where(Job.closed_at.is_(None))
+                            .limit(1)
+                        ).first()
                     is_repost = twin is not None
                     s.add(
                         Job(
@@ -340,6 +355,8 @@ class Repository:
                 "last_error": row.last_error,
                 "detected_connector": row.detected_connector,
                 "detected_params": json.loads(row.detected_params) if row.detected_params else None,
+                # Drives the re-discovery cooldown; set on failed attempts too.
+                "detected_at": _aware(row.detected_at),
             }
 
     async def get_company_state(self, slug: str) -> Dict[str, Any]:

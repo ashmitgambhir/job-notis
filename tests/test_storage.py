@@ -161,3 +161,52 @@ class TestReporting:
 
         # Nothing is old enough to purge yet.
         assert await repo.purge_stale(older_than_days=30) == 0
+
+
+class TestDuplicatePostings:
+    """Connectors legitimately return the same posting twice.
+
+    Paginated boards overlap when the underlying list shifts mid-walk, and
+    HTML sources emit one link per layout region. Before this was handled, the
+    unique constraint aborted the whole batch and every posting for that
+    company was lost — it took out Texas Instruments, AbbVie, AGCO, ExxonMobil
+    and Hershey in one run.
+    """
+
+    @pytest.mark.asyncio
+    async def test_duplicates_in_one_batch_do_not_raise(self, repo, posting_factory):
+        batch = [posting_factory(external_id="A") for _ in range(3)]
+        new, changed = await repo.upsert_postings(batch)
+        assert len(new) == 1
+        assert not changed
+
+    @pytest.mark.asyncio
+    async def test_mixed_batch_keeps_the_distinct_ones(self, repo, posting_factory):
+        batch = [
+            posting_factory(external_id="A"),
+            posting_factory(external_id="B", title="Design Engineer"),
+            posting_factory(external_id="A"),
+            posting_factory(external_id="C", title="Test Engineer"),
+        ]
+        new, _ = await repo.upsert_postings(batch)
+        assert {p.external_id for p in new} == {"A", "B", "C"}
+
+    @pytest.mark.asyncio
+    async def test_large_duplicate_heavy_batch(self, repo, posting_factory):
+        # 600 postings, only 200 distinct — also crosses the 500-key chunking.
+        batch = [
+            posting_factory(external_id=str(i % 200), title=f"Engineer {i % 200}")
+            for i in range(600)
+        ]
+        new, _ = await repo.upsert_postings(batch)
+        assert len(new) == 200
+
+
+class TestDiscoveryCooldown:
+    @pytest.mark.asyncio
+    async def test_failed_discovery_timestamp_is_readable(self, repo):
+        """The orchestrator's back-off depends on this field being returned."""
+        await repo.update_company_state("x", detected_at=utcnow())
+        state = await repo.get_company_state("x")
+        assert state["detected_at"] is not None
+        assert state["detected_connector"] is None

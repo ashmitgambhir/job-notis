@@ -271,9 +271,26 @@ class Orchestrator:
                 # Cached detection has gone stale; fall through and re-discover.
                 log.warning("cached_connector_invalid", company=company.slug, error=str(exc))
 
+        # Discovery is expensive — it walks a candidate list and makes a real
+        # request per candidate. Repeating that every cycle for a company that
+        # has no findable endpoint wastes most of the cycle. Back off instead.
+        cooldown = self.config.settings.scan.rediscover_after_hours
+        last_attempt = state.get("detected_at")
+        if cooldown and last_attempt and not state.get("detected_connector"):
+            age_hours = (utcnow() - last_attempt).total_seconds() / 3600
+            if age_hours < cooldown:
+                raise ConnectorError(
+                    f"no endpoint known for '{company.slug}'; discovery last failed "
+                    f"{age_hours:.1f}h ago and retries every {cooldown}h. "
+                    f"Set `connector:` and `params:` in companies.yaml to fix it now.",
+                    company=company.slug,
+                )
+
         log.info("running_discovery", company=company.slug)
         discovery = await self._discovery.discover(company)
         if not discovery.ok:
+            # Record the attempt so the cooldown above applies next cycle.
+            await self.repo.update_company_state(company.slug, detected_at=utcnow())
             raise ConnectorError(
                 f"could not determine a working connector for '{company.slug}': "
                 f"{discovery.error}. Tried: "
@@ -323,18 +340,40 @@ class Orchestrator:
         if not health.enabled or not cycle.companies:
             return
 
-        if cycle.failure_ratio >= health.cycle_failure_ratio_alert:
-            names = ", ".join(f"{c.company_slug} ({c.error_type})" for c in cycle.failures[:12])
+        # Only companies that have succeeded at least once count toward the
+        # ratio. A company with no resolved endpoint fails every single cycle
+        # by definition — that is a configuration gap, not an incident, and
+        # alerting on it hourly just teaches you to ignore the alerts. What
+        # actually warrants waking someone is a *regression*: something that
+        # used to work and has stopped.
+        regressed = []
+        for failure in cycle.failures:
+            state = await self.repo.get_company_state(failure.company_slug)
+            if state.get("last_success_at"):
+                regressed.append(failure)
+
+        known_good = 0
+        for result in cycle.companies:
+            if result.ok:
+                known_good += 1
+            elif (await self.repo.get_company_state(result.company_slug)).get("last_success_at"):
+                known_good += 1
+
+        if known_good and len(regressed) / known_good >= health.cycle_failure_ratio_alert:
+            names = ", ".join(f"{c.company_slug} ({c.error_type})" for c in regressed[:12])
             await self.dispatcher.send_alert(
                 "cycle_failure_ratio",
-                f"{len(cycle.failures)}/{len(cycle.companies)} companies failed",
-                f"A scan cycle finished with {cycle.failure_ratio:.0%} of companies "
-                f"failing.\n\nFailures: {names}\n\n"
-                "This usually means a network problem on the host rather than "
-                "many sites breaking at once.",
+                f"{len(regressed)} of {known_good} working companies just failed",
+                f"{len(regressed)}/{known_good} companies that normally work failed "
+                f"in the last scan.\n\nFailures: {names}\n\n"
+                "Because these have succeeded before, this is a change rather than "
+                "a configuration gap — most often a network problem on the host, or "
+                "a careers platform that has moved.\n\n"
+                f"({len(cycle.failures) - len(regressed)} other companies also failed, "
+                "but have never had a working endpoint, so they are excluded.)",
             )
 
-        for failure in cycle.failures:
+        for failure in regressed:
             consecutive = (await self.repo.get_company_state(failure.company_slug)).get(
                 "consecutive_failures", 0
             )

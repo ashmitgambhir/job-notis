@@ -43,6 +43,11 @@ class ScanSettings(_Base):
     # First scan of a company records everything without notifying, so you do
     # not get 2,000 texts on day one.
     seed_without_notifying: bool = True
+    # How long to leave a company alone after discovery fails for it. Without
+    # this, every unresolved company re-probes its whole candidate list on
+    # every cycle — dozens of doomed HTTP requests that dominate the cycle
+    # budget and starve the companies that actually work.
+    rediscover_after_hours: int = Field(6, ge=0)
 
 
 class HttpSettings(_Base):

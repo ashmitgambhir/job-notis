@@ -90,7 +90,17 @@ def scan(ctx: click.Context, only: tuple, no_notify: bool) -> None:
         click.secho(f"  {len(result.failures)} companies failed:", fg="yellow")
         for failure in result.failures:
             click.echo(f"    {failure.company_slug}: {failure.error}")
-    sys.exit(1 if result.failure_ratio > 0.5 else 0)
+
+    # Partial failure is the normal steady state: some companies have no
+    # resolved endpoint yet, and careers sites break independently. Exiting
+    # non-zero for that paints every scheduled run red until the signal is
+    # worthless. Fail only when nothing at all worked, which means something
+    # systemic — no network, bad config, dead host.
+    succeeded = len(result.companies) - len(result.failures)
+    if result.companies and succeeded == 0:
+        click.secho("  every company failed — check connectivity and config", fg="red")
+        sys.exit(1)
+    sys.exit(0)
 
 
 # --------------------------------------------------------------------------- #
