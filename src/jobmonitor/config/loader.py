@@ -60,11 +60,16 @@ def _interpolate(value: Any) -> Any:
         def repl(m: re.Match) -> str:
             name, default = m.group(1), m.group(2)
             resolved = os.environ.get(name)
-            if resolved is None:
+            # POSIX `${VAR:-default}` semantics: the default applies when the
+            # variable is unset *or empty*. Handling only "unset" broke every
+            # CI deployment — GitHub Actions materialises a missing secret as
+            # an empty string, so `${LLM_ENABLED:-false}` resolved to "" and
+            # then to None, and boolean fields failed validation.
+            if resolved is None or resolved == "":
                 if default is None:
-                    # An unset secret is normal (that channel is just off), so
-                    # collapse to empty rather than exploding at load time. The
-                    # channel's own validation reports it.
+                    # An unset secret with no default is normal (that channel
+                    # is simply off); collapse to empty rather than exploding
+                    # at load time. The channel's own validation reports it.
                     return ""
                 return default
             return resolved

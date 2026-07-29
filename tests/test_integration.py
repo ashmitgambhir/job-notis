@@ -35,6 +35,48 @@ class TestConfigInterpolation:
         monkeypatch.delenv("NOPE", raising=False)
         assert _interpolate("${NOPE}") is None
 
+    def test_empty_string_triggers_the_default(self, monkeypatch):
+        """Set-but-empty must behave like unset, as POSIX `:-` does.
+
+        GitHub Actions materialises a missing secret as an empty string, so
+        `LLM_ENABLED: ${{ secrets.LLM_ENABLED }}` exports `LLM_ENABLED=""`.
+        Treating that as a real value made `${LLM_ENABLED:-false}` resolve to
+        None and every boolean field failed validation in CI.
+        """
+        monkeypatch.setenv("LLM_ENABLED", "")
+        assert _interpolate("${LLM_ENABLED:-false}") == "false"
+
+    def test_empty_string_without_default_still_none(self, monkeypatch):
+        monkeypatch.setenv("SOME_TOKEN", "")
+        assert _interpolate("${SOME_TOKEN}") is None
+
+    def test_real_value_still_wins_over_default(self, monkeypatch):
+        monkeypatch.setenv("LLM_ENABLED", "true")
+        assert _interpolate("${LLM_ENABLED:-false}") == "true"
+
+    def test_config_loads_with_all_secrets_empty(self, monkeypatch):
+        """Reproduces the CI failure end-to-end.
+
+        Every secret referenced by the workflow is exported empty, exactly as
+        a fresh GitHub repository with none of them configured would.
+        """
+        for name in (
+            "LLM_ENABLED", "SMS_ENABLED", "EMAIL_ENABLED", "SLACK_ENABLED",
+            "DISCORD_ENABLED", "TELEGRAM_ENABLED", "WEBHOOK_ENABLED",
+            "DAILY_DIGEST_ENABLED", "WEEKLY_DIGEST_ENABLED", "EMAIL_PROVIDER",
+            "SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "ALERT_EMAIL",
+            "ALERT_FROM_EMAIL", "ALERT_SMS_GATEWAY", "ANTHROPIC_API_KEY",
+            "DATABASE_URL", "LOG_LEVEL", "LOG_FORMAT", "HEALTH_PORT",
+        ):
+            monkeypatch.setenv(name, "")
+        config = load_config()
+        assert config.settings.matching.llm.enabled is False
+        assert config.notifications.email.enabled is False
+        assert config.notifications.sms.enabled is False
+        # Falling back to the documented defaults, not to None.
+        assert config.settings.database.url.startswith("sqlite")
+        assert config.settings.logging.level == "INFO"
+
     def test_unset_entries_are_dropped_from_lists(self, monkeypatch):
         """An unset recipient means "channel off", not "a recipient named null"."""
         monkeypatch.delenv("NOPE", raising=False)
