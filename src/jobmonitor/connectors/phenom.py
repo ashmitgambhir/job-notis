@@ -1,18 +1,28 @@
 """Phenom People career sites.
 
-Used by RTX, United Airlines, ITW's front end and many others; recognisable by
-the ``/us/en`` or ``/global/en`` locale path.
+Used by United Airlines, RTX, Abbott's front end and many others; recognisable
+by the ``/us/en`` or ``/global/en`` locale path.
 
-Phenom renders search results client-side from an XHR that returns
-``eagerLoadRefineSearch.data.jobs``. Requesting that endpoint with
-``X-Requested-With: XMLHttpRequest`` yields JSON directly. Tenants differ in
-which path they expose, so several are tried before falling back to the
-JSON-LD embedded in the server-rendered page.
+Phenom renders search results client-side, but it also **embeds the same data
+in the page** as a ``window.phApp.ddo = {...}`` blob containing
+``eagerLoadRefineSearch.data.jobs``. Reading that is far more reliable than
+guessing at the XHR: the plausible-looking ``/widgets`` and ``/api/jobs`` paths
+return 404 and 500 on live tenants, whereas the embedded payload is what
+actually renders the page and carries full records — title, requisition id,
+category, department, posting date and apply URL.
+
+Verified against United Airlines: 10 jobs per page, paginated with ``?from=N``.
+
+Some tenants (RTX) sit behind a bot-protection interstitial that answers 403 to
+any non-browser client. Nothing can be done from here; those need the browser
+connector.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import json
+import re
+from typing import Any, Dict, List, Optional, Set
 
 import structlog
 
@@ -22,18 +32,56 @@ from .base import Connector
 from .jsonld import find_job_postings, iter_jsonld_blocks, posting_from_jsonld
 
 log = structlog.get_logger(__name__)
-PAGE_SIZE = 100
-MAX_PAGES = 20
+
+PAGE_SIZE = 10          # Phenom's own page size; not configurable per request.
+MAX_PAGES = 60
+_DDO = re.compile(r"phApp\.ddo\s*=\s*(\{)")
+
+
+def extract_ddo(html: str) -> Optional[Dict[str, Any]]:
+    """Pull the ``phApp.ddo`` object out of a Phenom page.
+
+    It is a JavaScript assignment rather than a script tag with a clean
+    boundary, so the closing brace is found by counting depth — a lazy regex
+    would stop at the first nested object. String contents are skipped so a
+    brace inside a job description cannot throw the count off.
+    """
+    match = _DDO.search(html)
+    if not match:
+        return None
+    start = match.start(1)
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(html)):
+        ch = html[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(html[start : i + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None
 
 
 class PhenomConnector(Connector):
     name = "phenom"
     platform = "phenom"
     required_params = ("host",)
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self._working_path: Optional[str] = None
 
     @property
     def _host(self) -> str:
@@ -43,126 +91,98 @@ class PhenomConnector(Connector):
     def _locale(self) -> str:
         return str(self.params.get("locale", "us/en")).strip("/")
 
-    def _candidate_paths(self) -> List[str]:
-        return [
-            f"https://{self._host}/{self._locale}/search-results",
-            f"https://{self._host}/search-results",
-            f"https://{self._host}/{self._locale}/jobs",
-        ]
+    @property
+    def _search_url(self) -> str:
+        return f"https://{self._host}/{self._locale}/search-results"
 
     async def fetch_listings(self) -> List[JobPosting]:
-        paths = [self._working_path] if self._working_path else self._candidate_paths()
-        last_error: Optional[Exception] = None
-
-        for path in paths:
-            try:
-                postings = await self._fetch_xhr(path)
-                if postings:
-                    self._working_path = path
-                    return postings
-            except (PermanentError, TransientError, ConnectorError) as exc:
-                last_error = exc
-                log.debug("phenom_path_failed", path=path, error=str(exc))
-
-        # Server-rendered JSON-LD is the safety net when the XHR shape changes.
-        postings = await self._fetch_jsonld()
-        if postings:
-            return postings
-
-        raise ConnectorError(
-            f"phenom site {self._host} yielded no postings: {last_error}",
-            company=self.company.slug,
-        )
-
-    async def _fetch_xhr(self, path: str) -> List[JobPosting]:
         postings: List[JobPosting] = []
-        offset = 0
-        for _ in range(MAX_PAGES):
-            payload, _cached = await self.http.get_json(
-                path,
-                params={
-                    "from": offset,
-                    "s": 1,
-                    "rk": "l-search-results",
-                    "keyword": self.params.get("query", ""),
-                },
-                headers={
-                    "Accept": "application/json",
-                    # Without this header Phenom serves the HTML shell instead.
-                    "X-Requested-With": "XMLHttpRequest",
-                },
-            )
-            jobs = self._extract_jobs(payload)
-            if not jobs:
+        seen: Set[str] = set()
+        query = self.params.get("query", "")
+
+        for page in range(MAX_PAGES):
+            params: Dict[str, Any] = {"from": page * PAGE_SIZE, "s": 1}
+            if query:
+                params["keyword"] = query
+            try:
+                html, _ = await self.http.get_text(
+                    self._search_url, params=params, headers={"Accept": "text/html"}
+                )
+            except (PermanentError, TransientError) as exc:
+                if page == 0:
+                    raise ConnectorError(
+                        f"phenom site {self._host} is unreachable ({exc}). A tenant "
+                        "behind a bot-protection interstitial needs the browser "
+                        "connector instead.",
+                        company=self.company.slug,
+                    ) from exc
                 break
+
+            jobs = self._jobs_from(html)
+            if not jobs:
+                if page == 0:
+                    # No embedded payload — try the server-rendered schema.org
+                    # markup before giving up on the tenant entirely.
+                    fallback = self._from_jsonld(html)
+                    if fallback:
+                        return fallback
+                break
+
+            fresh = 0
             for job in jobs:
                 posting = self._to_posting(job)
-                if posting:
+                if posting and posting.job_key not in seen:
+                    seen.add(posting.job_key)
                     postings.append(posting)
-            offset += len(jobs)
-            total = self._extract_total(payload)
-            if total and offset >= total:
+                    fresh += 1
+            # Past the last page Phenom repeats the final one rather than
+            # returning empty, so a page with nothing new means we are done.
+            if fresh == 0:
                 break
-            if len(jobs) < 10:
-                break
+
+        if not postings:
+            raise ConnectorError(
+                f"phenom site {self._host} exposed no postings", company=self.company.slug
+            )
         return postings
 
     @staticmethod
-    def _extract_jobs(payload: Any) -> List[Dict[str, Any]]:
-        if not isinstance(payload, dict):
+    def _jobs_from(html: str) -> List[Dict[str, Any]]:
+        ddo = extract_ddo(html)
+        if not ddo:
             return []
-        eager = payload.get("eagerLoadRefineSearch") or payload.get("refineSearch") or {}
+        eager = ddo.get("eagerLoadRefineSearch") or ddo.get("refineSearch") or {}
         data = eager.get("data") if isinstance(eager, dict) else None
         if isinstance(data, dict):
             jobs = data.get("jobs")
             if isinstance(jobs, list):
                 return jobs
-        for key in ("jobs", "results", "hits"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                return value
         return []
 
-    @staticmethod
-    def _extract_total(payload: Any) -> int:
-        if not isinstance(payload, dict):
-            return 0
-        eager = payload.get("eagerLoadRefineSearch") or {}
-        data = eager.get("data") if isinstance(eager, dict) else {}
-        if isinstance(data, dict):
-            try:
-                return int(data.get("totalHits") or data.get("total") or 0)
-            except (TypeError, ValueError):
-                return 0
-        return 0
-
     def _to_posting(self, job: Dict[str, Any]) -> Optional[JobPosting]:
-        job_id = job.get("jobId") or job.get("jobSeqNo") or job.get("id")
-        title = job.get("title") or job.get("jobTitle")
+        job_id = job.get("jobId") or job.get("jobSeqNo")
+        title = job.get("title")
         if not job_id or not title:
             return None
-        location = job.get("location") or ", ".join(
-            str(p) for p in [job.get("cityStateCountry"), job.get("city"), job.get("state")] if p
-        )
         return self._posting(
             external_id=str(job_id),
             title=title,
-            url=job.get("applyUrl") or job.get("jobUrl") or f"https://{self._host}",
-            location=location or None,
-            department=job.get("department") or job.get("category") or job.get("ml_job_parser"),
+            url=job.get("applyUrl") or f"https://{self._host}",
+            location=job.get("cityStateCountry") or job.get("cityState") or job.get("city"),
+            department=job.get("department") or job.get("category"),
             posted_at=self.parse_date(job.get("postedDate") or job.get("dateCreated")),
-            description=self.strip_html(job.get("descriptionTeaser") or job.get("description")),
-            detail_pending=not job.get("description"),
-            raw={"type": job.get("type"), "job_seq_no": job.get("jobSeqNo")},
+            description=self.strip_html(job.get("descriptionTeaser")),
+            # The teaser is a summary; full text needs the detail page.
+            detail_pending=True,
+            raw={
+                "job_seq_no": job.get("jobSeqNo"),
+                "job_level": job.get("jobLevel"),
+                "division": job.get("division"),
+            },
         )
 
-    async def _fetch_jsonld(self) -> List[JobPosting]:
-        url = f"https://{self._host}/{self._locale}/search-results"
-        try:
-            html, _ = await self.http.get_text(url, headers={"Accept": "text/html"})
-        except (PermanentError, TransientError):
-            return []
-        postings: List[JobPosting] = []
+    def _from_jsonld(self, html: str) -> List[JobPosting]:
+        postings = []
         for block in iter_jsonld_blocks(html):
             for node in find_job_postings(block):
                 posting = posting_from_jsonld(
@@ -170,14 +190,14 @@ class PhenomConnector(Connector):
                     company=self.company.name,
                     slug=self.company.slug,
                     platform=self.platform,
-                    fallback_url=url,
+                    fallback_url=self._search_url,
                 )
                 if posting:
                     postings.append(posting)
         return postings
 
     async def fetch_detail(self, posting: JobPosting) -> JobPosting:
-        if not posting.url or not posting.detail_pending:
+        if not posting.url:
             posting.detail_pending = False
             return posting
         try:
@@ -185,12 +205,23 @@ class PhenomConnector(Connector):
         except (PermanentError, TransientError):
             posting.detail_pending = False
             return posting
+
+        # The detail page carries the same blob, with the full description.
+        ddo = extract_ddo(html) or {}
+        detail = ddo.get("jobDetail") or {}
+        data = detail.get("data") if isinstance(detail, dict) else None
+        job = (data or {}).get("job") if isinstance(data, dict) else None
+        if isinstance(job, dict) and job.get("description"):
+            posting.description = self.strip_html(job["description"])
+            posting.detail_pending = False
+            return posting
+
         for block in iter_jsonld_blocks(html):
             for node in find_job_postings(block):
-                description = node.get("description")
-                if description:
-                    posting.description = self.strip_html(str(description))
+                if node.get("description"):
+                    posting.description = self.strip_html(str(node["description"]))
                     posting.detail_pending = False
                     return posting
+
         posting.detail_pending = False
         return posting

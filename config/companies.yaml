@@ -133,25 +133,26 @@ companies:
 - name: John Deere
   slug: johndeere
   priority: high
-  connector: eightfold
-  params:
-    host: careers.deere.com
-    domain: deere.com
+  connector: auto
+  params: {}
   careers_url: https://careers.deere.com/careers
   tags:
   - agriculture
   - heavy-equipment
-  notes: Eightfold front end; confirm the api/apply/v2 domain parameter.
+  notes: Eightfold API returns 403 'Not authorized for PCSX' on every host and domain combination; needs
+    the browser connector.
+  verified: false
 - name: Northrop Grumman
   slug: northrop
-  connector: eightfold
-  params:
-    host: jobs.northropgrumman.com
-    domain: northropgrumman.com
+  connector: auto
+  params: {}
   careers_url: https://jobs.northropgrumman.com/careers
   tags:
   - defense
   - aerospace
+  verified: false
+  notes: Eightfold API returns 403 'Not authorized for PCSX' on every host and domain combination; needs
+    the browser connector.
 - name: Navistar International
   slug: navistar
   connector: icims
@@ -214,14 +215,14 @@ companies:
   verified: true
 - name: RTX
   slug: rtx
-  connector: phenom
-  params:
-    host: careers.rtx.com
-    locale: global/en
+  connector: auto
+  params: {}
   careers_url: https://careers.rtx.com/global/en
   tags:
   - aerospace
   - defense
+  verified: false
+  notes: Phenom tenant behind a Cloudflare interstitial; returns 403 to any non-browser client.
 - name: United Airlines
   slug: united
   connector: phenom
@@ -231,6 +232,7 @@ companies:
   careers_url: https://careers.united.com/us/en
   tags:
   - aviation
+  verified: true
 - name: Siemens
   slug: siemens
   connector: avature

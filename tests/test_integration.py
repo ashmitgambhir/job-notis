@@ -176,6 +176,42 @@ class TestHttpClient:
 
     @respx.mock
     @pytest.mark.asyncio
+    async def test_query_params_are_part_of_the_cache_key(self, settings):
+        """Pagination varies only the query string.
+
+        Keying the cache on the URL alone made page 2 a cache hit for page 1,
+        so every paginated connector read one page and then repeated it until
+        the page limit ran out. AWS reported 67 postings instead of 402.
+        """
+        route = respx.get("https://x.test/list").mock(
+            side_effect=lambda req: httpx.Response(
+                200, json={"page": req.url.params.get("offset")}
+            )
+        )
+        async with HttpClient(settings) as client:
+            first, _ = await client.get_json("https://x.test/list", params={"offset": 0})
+            second, cached = await client.get_json(
+                "https://x.test/list", params={"offset": 100}
+            )
+        assert first != second
+        assert cached is False
+        assert route.call_count == 2
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_identical_params_still_cache(self, settings):
+        route = respx.get("https://x.test/same").mock(
+            return_value=httpx.Response(200, json={"n": 1})
+        )
+        async with HttpClient(settings) as client:
+            await client.get_json("https://x.test/same", params={"a": 1, "b": 2})
+            # Different dict order, same query — must still be one request.
+            _, cached = await client.get_json("https://x.test/same", params={"b": 2, "a": 1})
+        assert cached is True
+        assert route.call_count == 1
+
+    @respx.mock
+    @pytest.mark.asyncio
     async def test_gzip_response_survives_the_cache(self, settings):
         """Caching decoded bytes alongside Content-Encoding broke replay.
 

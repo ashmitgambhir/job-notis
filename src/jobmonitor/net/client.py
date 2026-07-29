@@ -113,8 +113,22 @@ class HttpClient:
     def _host(url: str) -> str:
         return urlparse(url).netloc or url
 
-    def _cache_key(self, method: str, url: str, body: Optional[str]) -> str:
-        return f"{method}:{url}:{body or ''}"
+    @staticmethod
+    def _cache_key(
+        method: str, url: str, body: Optional[str], params: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Cache identity must include the query string.
+
+        Nearly every paginated connector varies only the query params —
+        ``?from=10``, ``?offset=100``, ``?Page=2`` — while the URL stays
+        constant. Keying on the URL alone made page 2 a cache hit for page 1,
+        so a board was read once and then repeated until the page limit ran
+        out. Sorted so equivalent params always produce the same key.
+        """
+        query = ""
+        if params:
+            query = "&".join(f"{k}={params[k]}" for k in sorted(params))
+        return f"{method}:{url}?{query}:{body or ''}"
 
     def _backoff_delay(self, attempt: int, retry_after: Optional[float]) -> float:
         if retry_after is not None:
@@ -163,7 +177,7 @@ class HttpClient:
         assert self._client is not None
 
         host = self._host(url)
-        cache_key = self._cache_key(method, url, str(json_body or data or ""))
+        cache_key = self._cache_key(method, url, str(json_body or data or ""), params)
         cached = self._cache.get(cache_key) if use_cache else None
 
         # Fresh enough to skip the network entirely.
