@@ -572,6 +572,37 @@ class Repository:
     async def all_jobs(self, min_score: int = 0, limit: int = 10000) -> List[Dict[str, Any]]:
         return await asyncio.to_thread(self._all_jobs_sync, min_score, limit)
 
+    def _reset_alerts_sync(self) -> Dict[str, int]:
+        """Forget which postings have been seen and alerted, keep seeded flags.
+
+        Used after a filter change, to re-apply the new rules to postings that
+        are already open. Both halves matter:
+
+        * clearing ``jobs`` makes the next scan treat every open posting as
+          new, so it is re-fetched, re-scored under the current config and can
+          notify again;
+        * keeping ``company_state.seeded`` is what stops that from being
+          silent — an unseeded company records its whole board without
+          notifying, which would be the exact opposite of the intent.
+        """
+        with self.session() as s:
+            jobs = s.execute(delete(Job)).rowcount or 0
+            notes = s.execute(delete(Notification)).rowcount or 0
+            kept = (
+                s.scalar(
+                    select(func.count())
+                    .select_from(CompanyState)
+                    .where(CompanyState.seeded.is_(True))
+                )
+                or 0
+            )
+            s.commit()
+        return {"jobs_cleared": int(jobs), "notifications_cleared": int(notes),
+                "companies_still_seeded": int(kept)}
+
+    async def reset_alerts(self) -> Dict[str, int]:
+        return await asyncio.to_thread(self._reset_alerts_sync)
+
     def _purge_sync(self, older_than_days: int) -> int:
         cutoff = utcnow() - timedelta(days=older_than_days)
         with self.session() as s:

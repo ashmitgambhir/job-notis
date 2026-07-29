@@ -498,6 +498,52 @@ def health(ctx: click.Context) -> None:
     sys.exit(0 if healthy else 1)
 
 
+@main.command("reset-alerts")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
+@click.pass_context
+def reset_alerts(ctx: click.Context, yes: bool) -> None:
+    """Re-alert every currently-open posting that matches the current filters.
+
+    Clears the record of which postings have been seen and notified, while
+    keeping companies marked as seeded. The next scan then treats every open
+    posting as new, re-scores it under the current configuration, and sends
+    what qualifies.
+
+    Use after changing filters — the alerts you already received were decided
+    by the old rules and will not be revisited otherwise.
+    """
+    config = _load(ctx.obj["config_dir"])
+
+    if not yes:
+        click.secho("This will re-send alerts for every open posting that matches.", fg="yellow")
+        channels = [
+            name
+            for name in ("sms", "email", "slack", "discord", "telegram", "webhook")
+            if getattr(config.notifications, name).enabled
+        ]
+        click.echo(f"  channels: {', '.join(channels) or 'none enabled'}")
+        click.echo(f"  threshold: {config.settings.matching.threshold}")
+        click.echo(f"  types wanted: {', '.join(config.filters.employment_types) or 'all'}")
+        click.confirm("Continue?", abort=True)
+
+    async def go():
+        from .storage.repository import Repository
+
+        repo = Repository(config.settings.database)
+        await repo.initialize()
+        stats = await repo.reset_alerts()
+        await repo.close()
+        return stats
+
+    stats = asyncio.run(go())
+    click.secho("Alert history cleared.", fg="green", bold=True)
+    click.echo(f"  postings forgotten       {stats['jobs_cleared']}")
+    click.echo(f"  notification records     {stats['notifications_cleared']}")
+    click.echo(f"  companies still seeded   {stats['companies_still_seeded']}")
+    click.echo("")
+    click.echo("The next scan will re-score every open posting and alert on matches.")
+
+
 @main.command("init-db")
 @click.pass_context
 def init_db(ctx: click.Context) -> None:

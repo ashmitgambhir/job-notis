@@ -30,6 +30,10 @@ on:
         description: "Scan and score without sending anything"
         type: boolean
         default: false
+      reset_alerts:
+        description: "Re-alert every open posting matching current filters (one-off)"
+        type: boolean
+        default: false
 
 concurrency:
   # Never let two scans overlap — they would race on the dedupe state.
@@ -77,6 +81,13 @@ jobs:
           path: data
           key: jobmon-db-${{ github.run_id }}
           restore-keys: jobmon-db-
+
+      # Runs before the scan so the same job re-scores and re-alerts in one go.
+      - name: Reset alert history
+        if: inputs.reset_alerts
+        env:
+          LOG_FORMAT: json
+        run: jobmon reset-alerts --yes
 
       - name: Scan
         env:

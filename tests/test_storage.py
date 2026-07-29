@@ -210,3 +210,50 @@ class TestDiscoveryCooldown:
         state = await repo.get_company_state("x")
         assert state["detected_at"] is not None
         assert state["detected_connector"] is None
+
+
+class TestResetAlerts:
+    """Re-applying changed filters to postings that are already open."""
+
+    @pytest.mark.asyncio
+    async def test_clears_jobs_and_notifications(self, repo, posting_factory):
+        await repo.upsert_postings([posting_factory(external_id=str(i)) for i in range(5)])
+        await repo.claim_notification("caterpillar:0", "email", "caterpillar:0#1", 90)
+
+        stats = await repo.reset_alerts()
+        assert stats["jobs_cleared"] == 5
+        assert stats["notifications_cleared"] == 1
+
+    @pytest.mark.asyncio
+    async def test_seeded_flags_survive(self, repo, posting_factory):
+        """The critical half.
+
+        If seeding state were cleared too, the next scan would record every
+        board silently and send nothing — the opposite of the intent.
+        """
+        await repo.update_company_state("caterpillar", seeded=True)
+        await repo.upsert_postings([posting_factory()])
+
+        stats = await repo.reset_alerts()
+        assert stats["companies_still_seeded"] == 1
+        assert (await repo.get_company_state("caterpillar"))["seeded"] is True
+
+    @pytest.mark.asyncio
+    async def test_postings_look_new_again_afterwards(self, repo, posting_factory):
+        posting = posting_factory()
+        new, _ = await repo.upsert_postings([posting])
+        assert len(new) == 1
+
+        new, _ = await repo.upsert_postings([posting])
+        assert not new                      # already known
+
+        await repo.reset_alerts()
+        new, _ = await repo.upsert_postings([posting])
+        assert len(new) == 1                # new again, so it can re-alert
+
+    @pytest.mark.asyncio
+    async def test_notification_can_be_reclaimed(self, repo):
+        assert await repo.claim_notification("c:1", "sms", "c:1#1", 90) is True
+        assert await repo.claim_notification("c:1", "sms", "c:1#1", 90) is False
+        await repo.reset_alerts()
+        assert await repo.claim_notification("c:1", "sms", "c:1#1", 90) is True
