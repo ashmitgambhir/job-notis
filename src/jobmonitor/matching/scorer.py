@@ -75,7 +75,9 @@ class Scorer:
         value rather than zero.
         """
         posting.employment_type = enrich(posting).employment_type
-        excluded = self.rules.hard_exclusion(posting)
+        # Prefilter only: the description has not been fetched yet, so the
+        # employment type is not yet trustworthy enough to exclude on.
+        excluded = self.rules.hard_exclusion(posting, defer_employment_type=True)
         if excluded:
             return 0.0, excluded
 

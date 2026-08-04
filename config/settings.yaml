@@ -15,7 +15,10 @@ scan:
   # that could plausibly clear the threshold. This is what keeps a 2-minute
   # cadence cheap.
   prefilter_before_detail_fetch: true
-  max_detail_fetches_per_cycle: 60
+  # Raised because employment type now fails closed: a posting whose title
+  # does not say "intern" is only kept if its description proves it is one,
+  # and that needs a fetch. Too low a budget silently costs real matches.
+  max_detail_fetches_per_cycle: 150
   # First sight of a company records its whole board silently. Turn this off
   # only if you enjoy 2,000 text messages.
   seed_without_notifying: true

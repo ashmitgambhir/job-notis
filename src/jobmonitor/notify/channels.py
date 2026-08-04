@@ -23,7 +23,7 @@ from ..config.schema import (
     TelegramChannel,
     WebhookChannel,
 )
-from ..errors import NotificationError
+from ..errors import NotificationError, PermanentError
 from ..net.client import HttpClient
 from .formatter import Alert
 
@@ -190,14 +190,14 @@ class EmailChannelImpl(Channel):
             await asyncio.to_thread(self._send_smtp, subject, body_html, body_text)
 
     async def _send_sendgrid(self, subject: str, body_html: str, body_text: str) -> None:
-        payload = {
-            "personals": None,
+        payload: Dict[str, Any] = {
             "personalizations": [
                 {"to": [{"email": address} for address in self.config.to_addresses]}
             ],
             "from": {"email": self.config.from_address},
             "subject": subject,
             "content": [
+                # SendGrid requires ascending MIME preference: plain first.
                 {"type": "text/plain", "value": body_text},
                 {"type": "text/html", "value": body_html},
             ],
@@ -208,20 +208,32 @@ class EmailChannelImpl(Channel):
                 "Auto-Submitted": "auto-generated",
             },
         }
-        payload.pop("personals")
-        response, _ = await self.http.request(
-            "POST",
-            "https://api.sendgrid.com/v3/mail/send",
-            json_body=payload,
-            headers={
-                "Authorization": f"Bearer {self.config.sendgrid_api_key}",
-                "Content-Type": "application/json",
-            },
-            use_cache=False,
-        )
+        try:
+            response, _ = await self.http.request(
+                "POST",
+                "https://api.sendgrid.com/v3/mail/send",
+                json_body=payload,
+                headers={
+                    "Authorization": f"Bearer {self.config.sendgrid_api_key}",
+                    "Content-Type": "application/json",
+                },
+                use_cache=False,
+            )
+        except PermanentError as exc:
+            # The HTTP layer turns any 4xx into PermanentError before we can
+            # read the status. SendGrid's 401/403 mean a bad key or an
+            # unverified sender — worth saying so, and worth not retrying.
+            raise NotificationError(
+                f"sendgrid rejected the request ({exc}). Check that SENDGRID_API_KEY "
+                "is valid and that the From address is a verified sender in SendGrid.",
+                channel=self.name,
+                permanent=True,
+            ) from exc
+
+        # SendGrid accepts with 202 and an empty body.
         if response.status_code >= 300:
             raise NotificationError(
-                f"sendgrid returned {response.status_code}: {response.text[:200]}",
+                f"sendgrid returned {response.status_code}: {response.text[:300]}",
                 channel=self.name,
             )
 

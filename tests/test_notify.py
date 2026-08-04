@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 
+import httpx
 import pytest
+import respx
 
 from jobmonitor.core.models import EmploymentType, MatchResult, WorkMode, utcnow
 from jobmonitor.net.client import HttpClient
@@ -281,3 +284,86 @@ class TestEmailFilteringHeaders:
         assert msg["Auto-Submitted"] == "auto-generated"
         # Plus-addressing survives into the envelope.
         assert "+jobs@" in msg["To"]
+
+
+class TestSendGridPath:
+    """The SendGrid path is what keeps alerts out of your Sent folder.
+
+    Gmail only files a copy in Sent when Gmail itself sent the message, so
+    handing delivery to SendGrid removes the duplicate entirely.
+    """
+
+    @pytest.fixture
+    def sendgrid_config(self, config):
+        return config.notifications.email.model_copy(
+            update={
+                "enabled": True,
+                "provider": "sendgrid",
+                "sendgrid_api_key": "SG.test-key",
+                "from_address": "me@example.com",
+                "to_addresses": ["me+jobs@example.com"],
+            }
+        )
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_payload_shape(self, sendgrid_config, settings):
+        from jobmonitor.notify.channels import EmailChannelImpl
+
+        route = respx.post("https://api.sendgrid.com/v3/mail/send").mock(
+            return_value=httpx.Response(202)
+        )
+        async with HttpClient(settings.http) as http:
+            await EmailChannelImpl(sendgrid_config, http).send_raw(
+                "[97%] Caterpillar — Intern", "<p>hi</p>", "hi"
+            )
+
+        body = json.loads(route.calls[0].request.content)
+        assert body["personalizations"][0]["to"] == [{"email": "me+jobs@example.com"}]
+        assert body["from"] == {"email": "me@example.com"}
+        # Plain must precede HTML — SendGrid rejects descending MIME order.
+        assert [c["type"] for c in body["content"]] == ["text/plain", "text/html"]
+        assert body["headers"]["X-JobMonitor"] == "alert"
+        assert "jobmonitor" in body["headers"]["List-Id"]
+        assert route.calls[0].request.headers["Authorization"] == "Bearer SG.test-key"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_202_counts_as_success(self, sendgrid_config, settings):
+        from jobmonitor.notify.channels import EmailChannelImpl
+
+        respx.post("https://api.sendgrid.com/v3/mail/send").mock(
+            return_value=httpx.Response(202)
+        )
+        async with HttpClient(settings.http) as http:
+            await EmailChannelImpl(sendgrid_config, http).send_raw("s", "<p>h</p>", "h")
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_unverified_sender_is_permanent_not_retried(
+        self, sendgrid_config, settings
+    ):
+        """403 means the From address is not a verified sender.
+
+        Retrying that four times just delays the error report.
+        """
+        from jobmonitor.errors import NotificationError
+        from jobmonitor.notify.channels import EmailChannelImpl
+
+        route = respx.post("https://api.sendgrid.com/v3/mail/send").mock(
+            return_value=httpx.Response(403, json={"errors": [{"message": "not verified"}]})
+        )
+        async with HttpClient(settings.http) as http:
+            with pytest.raises(NotificationError) as exc:
+                await EmailChannelImpl(sendgrid_config, http).send_raw("s", "<p>h</p>", "h")
+        assert exc.value.permanent is True
+        assert "verified sender" in str(exc.value)
+        assert route.call_count == 1
+
+    def test_missing_api_key_is_reported(self, sendgrid_config, settings):
+        from jobmonitor.notify.channels import EmailChannelImpl
+
+        cfg = sendgrid_config.model_copy(update={"sendgrid_api_key": None})
+        channel = EmailChannelImpl.__new__(EmailChannelImpl)
+        channel.config = cfg
+        assert "SENDGRID_API_KEY" in (channel.validate() or "")

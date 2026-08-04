@@ -139,14 +139,19 @@ class TestExclusions:
         ],
     )
     def test_kept_titles(self, engine, posting_factory, title):
-        assert engine.hard_exclusion(posting_factory(title=title)) is None
+        p = posting_factory(title=title)
+        enrich(p)
+        assert engine.hard_exclusion(p) is None
 
     def test_denied_location(self, engine, posting_factory):
         p = posting_factory(location="Bangalore, India")
+        enrich(p)
         assert "deny list" in (engine.hard_exclusion(p) or "")
 
     def test_us_state_counts_as_us(self, engine, posting_factory):
-        assert engine.hard_exclusion(posting_factory(location="Peoria, IL")) is None
+        p = posting_factory(location="Peoria, IL")
+        enrich(p)
+        assert engine.hard_exclusion(p) is None
 
 
 class TestSeniority:
@@ -294,7 +299,9 @@ class TestInternsOnly:
         p = posting_factory(title="Product Engineering Analyst", description=None)
         p.detail_pending = True
         enrich(p)
-        assert engine.hard_exclusion(p) is None
+        assert engine.hard_exclusion(p, defer_employment_type=True) is None
+        # The final pass never defers, so an unconfirmed posting is dropped.
+        assert engine.hard_exclusion(p) is not None
 
         # Once the description arrives and confirms full time, it is dropped.
         p.detail_pending = False
@@ -308,10 +315,54 @@ class TestInternsOnly:
         p = posting_factory(title="Product Engineering Analyst", description=None)
         p.detail_pending = True
         enrich(p)
-        assert engine.hard_exclusion(p) is None
+        assert engine.hard_exclusion(p, defer_employment_type=True) is None
 
         p.detail_pending = False
         p.description = "The intern will support product engineering. Currently enrolled."
         enrich(p)
         assert p.employment_type.value == "intern"
         assert engine.hard_exclusion(p) is None
+
+
+class TestUnconfirmedTypeFailsClosed:
+    """The leak that kept sending full-time roles after the interns-only change.
+
+    `detail_pending` stays True whenever the per-cycle fetch budget runs out or
+    a detail request fails — routine on a 19-company scan. The employment-type
+    check was skipped in exactly those cases, so it failed *open*: the busier
+    the cycle, the more full-time roles leaked through.
+    """
+
+    @pytest.fixture
+    def scorer(self, config):
+        strict = config.model_copy(deep=True)
+        strict.filters.employment_types = ["intern", "co-op"]
+        return Scorer(strict)
+
+    @pytest.mark.asyncio
+    async def test_full_time_role_without_a_description_is_not_sent(
+        self, scorer, posting_factory
+    ):
+        p = posting_factory(title="Mechanical Design Engineer", description=None)
+        p.detail_pending = True          # budget ran out; never fetched
+        result = await scorer.score(p)
+        assert not result.matched
+        assert result.excluded_by
+
+    @pytest.mark.asyncio
+    async def test_intern_title_still_sends_without_a_description(
+        self, scorer, posting_factory
+    ):
+        """Failing closed must not cost the obvious matches."""
+        p = posting_factory(title="Mechanical Engineering Intern", description=None)
+        p.detail_pending = True
+        result = await scorer.score(p)
+        assert result.matched
+
+    def test_prefilter_still_defers_so_odd_titles_survive_to_the_fetch(
+        self, scorer, posting_factory
+    ):
+        p = posting_factory(title="Part Time Student - Product Engineering",
+                            description=None)
+        p.detail_pending = True
+        assert scorer.worth_detail_fetch(p)

@@ -52,8 +52,16 @@ class RuleEngine:
 
     # -------------------------------------------------------- exclusions --
 
-    def hard_exclusion(self, posting: JobPosting) -> Optional[str]:
-        """Return the reason this posting should be dropped before scoring."""
+    def hard_exclusion(
+        self, posting: JobPosting, *, defer_employment_type: bool = False
+    ) -> Optional[str]:
+        """Return the reason this posting should be dropped before scoring.
+
+        ``defer_employment_type`` is for the prefilter only, where the
+        description has not been fetched yet. The final scoring pass must
+        never defer: a posting we cannot confirm is an internship is one we
+        must not send.
+        """
         title = posting.title or ""
         for raw_pattern, compiled in self._exclusions:
             if compiled.search(title):
@@ -63,21 +71,25 @@ class RuleEngine:
         if department and department in self._excluded_departments:
             return f"excluded department: {posting.department}"
 
-        # Employment type is only trustworthy once the description has been
-        # read. Judged on a title alone, an internship whose title does not say
+        # Judged on a title alone, an internship whose title does not say
         # "intern" — Deere's "Part Time Student - Product Engineering", say —
-        # classifies as full time and would be thrown away before anything
-        # fetched its description. So while the detail is still pending, defer:
-        # let the posting through the prefilter and apply this rule on the
-        # second pass, when the classifier has the full text to work with.
-        if (
-            self.filters.employment_types
-            and not posting.detail_pending
-            and posting.employment_type.value != "unknown"
+        # classifies as full time. Deferring in the *prefilter* keeps it alive
+        # long enough for its description to be fetched.
+        #
+        # The final pass must not defer. A description is not always available:
+        # the per-cycle detail-fetch budget runs out, and fetches fail. Skipping
+        # the check in those cases is what let full-time roles through — and it
+        # failed open, so the busier the cycle the more leaked. Unconfirmed now
+        # means excluded.
+        if self.filters.employment_types and not (
+            defer_employment_type and posting.detail_pending
         ):
             allowed = {t.lower() for t in self.filters.employment_types}
-            if posting.employment_type.value not in allowed:
-                return f"employment type not wanted: {posting.employment_type.value}"
+            actual = posting.employment_type.value
+            if actual == "unknown":
+                return "employment type could not be determined"
+            if actual not in allowed:
+                return f"employment type not wanted: {actual}"
 
         if self.filters.exclude_requiring_clearance and posting.requires_clearance:
             return "requires an active security clearance"
