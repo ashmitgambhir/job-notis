@@ -22,6 +22,21 @@ from jobmonitor.storage.repository import Repository
 from tests.test_notify import RecordingChannel
 
 
+def _recent(days_ago: int = 1) -> str:
+    """An ISO timestamp near now.
+
+    Fixtures must not hardcode absolute dates. `filters.max_posting_age_days`
+    discards anything older than 30 days, so a literal date silently turns a
+    passing test into a failing one once enough time passes — which is exactly
+    what happened to the scan-cycle test after it sat for three months.
+    """
+    from datetime import timedelta
+
+    from jobmonitor.core.models import utcnow
+
+    return (utcnow() - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 class TestConfigInterpolation:
     def test_substitutes_env(self, monkeypatch):
         monkeypatch.setenv("MY_TOKEN", "secret-value")
@@ -295,7 +310,7 @@ class TestScanCycle:
                             "title": "Mechanical Engineering Intern",
                             "absolute_url": "https://x/1",
                             "location": {"name": "Peoria, IL"},
-                            "updated_at": "2026-07-27T10:00:00Z",
+                            "updated_at": _recent(2),
                         }
                     ]
                 },
@@ -342,14 +357,14 @@ class TestScanCycle:
                                 "title": "Mechanical Engineering Intern",
                                 "absolute_url": "https://x/1",
                                 "location": {"name": "Peoria, IL"},
-                                "updated_at": "2026-07-27T10:00:00Z",
+                                "updated_at": _recent(2),
                             },
                             {
                                 "id": 2,
                                 "title": "Mechanical Design Engineer",
                                 "absolute_url": "https://x/2",
                                 "location": {"name": "Peoria, IL"},
-                                "updated_at": "2026-07-28T10:00:00Z",
+                                "updated_at": _recent(1),
                             },
                         ]
                     },
@@ -452,7 +467,7 @@ class TestHealthAlerting:
                     "id": 1, "title": "Mechanical Engineer",
                     "absolute_url": "https://x/1",
                     "location": {"name": "Peoria, IL"},
-                    "updated_at": "2026-07-27T10:00:00Z",
+                    "updated_at": _recent(2),
                 }]},
             )
         )
