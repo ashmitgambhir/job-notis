@@ -35,7 +35,36 @@ jobs:
 
       - name: Test
         # Unit tests are fully offline; every HTTP call is mocked with respx.
-        run: pytest -q
+        #
+        # On failure the summary is re-emitted as workflow annotations. Run
+        # logs need an authenticated download, whereas annotations are readable
+        # from the public API — so this is what makes a red build diagnosable
+        # by anyone who can see the repository.
+        run: |
+          set +e
+          pytest -q --tb=short -rf > pytest-output.txt 2>&1
+          status=$?
+          cat pytest-output.txt
+          if [ "$status" -ne 0 ]; then
+            echo "::group::annotated failure summary"
+            grep -E "^(FAILED|ERROR)" pytest-output.txt | head -20 | while IFS= read -r line; do
+              echo "::error title=pytest::${line}"
+            done
+            # The last block usually carries the assertion or import error.
+            tail -25 pytest-output.txt | while IFS= read -r line; do
+              [ -n "$line" ] && echo "::error title=pytest-tail::${line}"
+            done
+            echo "::endgroup::"
+          fi
+          exit $status
+
+      - name: Upload pytest output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-${{ matrix.python-version }}
+          path: pytest-output.txt
+          retention-days: 7
 
       - name: Validate shipped configuration
         run: |

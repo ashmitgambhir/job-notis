@@ -43,7 +43,9 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  # Write is needed only for the weekly heartbeat commit below, which is what
+  # stops GitHub disabling this workflow for inactivity.
+  contents: write
 
 jobs:
   scan:
@@ -163,3 +165,34 @@ jobs:
           name: logs-${{ github.run_id }}
           path: data/logs/
           retention-days: 7
+
+      # GitHub disables a scheduled workflow after 60 days without repository
+      # activity, and workflow runs do not count as activity — only commits do.
+      # This monitor went silent for exactly that reason after 84 quiet days.
+      #
+      # So the scan commits a heartbeat once a week, which resets the clock and
+      # makes the schedule self-sustaining. Guarded to a weekly cadence because
+      # the scan itself runs far more often than that.
+      - name: Weekly heartbeat
+        if: github.event_name == 'schedule' && always()
+        continue-on-error: true
+        run: |
+          STAMP=.github/last-run
+          WEEK_AGO=$(( $(date +%s) - 7*24*3600 ))
+          LAST=0
+          [ -f "$STAMP" ] && LAST=$(cut -d' ' -f1 < "$STAMP" 2>/dev/null || echo 0)
+          case "$LAST" in (''|*[!0-9]*) LAST=0 ;; esac
+
+          if [ "$LAST" -gt "$WEEK_AGO" ]; then
+            echo "Heartbeat is recent; nothing to commit."
+            exit 0
+          fi
+
+          echo "$(date +%s) $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STAMP"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$STAMP"
+          git commit -m "Heartbeat: keep the schedule alive" || exit 0
+          # Rebase first: an unrelated push may have landed during the scan.
+          git pull --rebase --quiet origin "${GITHUB_REF_NAME}" || true
+          git push origin "HEAD:${GITHUB_REF_NAME}"
